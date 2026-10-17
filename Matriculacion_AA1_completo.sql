@@ -1,6 +1,6 @@
 ﻿/* ADMINISTRACION DE BASES DE DATOS - Actividad Autonoma U1-T1
    Sistema de Matriculacion Universitaria: gestion de concurrencia y consistencia
-   Motor: SQL Server 2022 Express (localhost\SQLEXPRESS)   Autor: Marquez Villarroel Jafet Eliut
+   Motor: SQL Server 2022 Express (localhost\SQLEXPRESS), ejecutado en SSMS 22   Autor: Marquez Villarroel Jafet Eliut
    Contenido: 1) Esquema  2) Transacciones A/B/C  3) Niveles de aislamiento (dos sesiones)  4) Valor agregado: sp_Matricular */
 
 /* ======================================================================
@@ -184,47 +184,48 @@ GO
 
 
 /* ======================================================================
-   3. NIVELES DE AISLAMIENTO - ejecutar SESION 1 y SESION 2 en DOS ventanas al mismo tiempo
-   (restablecer antes de cada prueba: UPDATE Asignaturas SET cupos_disponibles=5 WHERE asignatura_id=1; DELETE FROM Registros_Matricula WHERE asignatura_id=1;)
+   3. NIVELES DE AISLAMIENTO - abrir DOS ventanas de consulta (SESION 1 y SESION 2) y ejecutarlas casi a la vez
+   Orden de ejecucion indicado en cada prueba. Antes de cada prueba restablecer:
+   UPDATE Asignaturas SET cupos_disponibles=5 WHERE asignatura_id=1; DELETE FROM Registros_Matricula WHERE asignatura_id=1;
    ====================================================================== */
 
 
--- ################ 3.1 READ UNCOMMITTED - lectura sucia ################
--- >>> SESION 1 (d1_RU_s1)
+-- ################ 3.1 READ UNCOMMITTED - lectura sucia  (ejecutar primero SESION 1, luego SESION 2) ################
+-- >>> SESION 1
 USE MatriculaDB;
 SET NOCOUNT ON;
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  BEGIN TRAN + UPDATE: resta 1 cupo (sin COMMIT)';
 BEGIN TRANSACTION;
 UPDATE Asignaturas SET cupos_disponibles = cupos_disponibles - 1 WHERE asignatura_id = 1;
 SELECT cupos_disponibles AS cupos_dentro_de_mi_transaccion FROM Asignaturas WHERE asignatura_id = 1;
-WAITFOR DELAY '00:00:10';
+WAITFOR DELAY '00:00:30';
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  El estudiante cancela: ROLLBACK';
 ROLLBACK;
 SELECT cupos_disponibles AS cupos_reales_tras_rollback FROM Asignaturas WHERE asignatura_id = 1;
--- >>> SESION 2 (d1_RU_s2)
+-- >>> SESION 2
 USE MatriculaDB;
 SET NOCOUNT ON;
 WAITFOR DELAY '00:00:04';
 SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Nivel READ UNCOMMITTED: leo los cupos';
 SELECT cupos_disponibles AS cupos_leidos_LECTURA_SUCIA FROM Asignaturas WHERE asignatura_id = 1;
-WAITFOR DELAY '00:00:09';
+WAITFOR DELAY '00:00:30';
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Leo de nuevo despues del ROLLBACK de la Sesion 1';
 SELECT cupos_disponibles AS cupos_reales FROM Asignaturas WHERE asignatura_id = 1;
 
--- ################ 3.2a READ COMMITTED - evita lectura sucia (la Sesion 2 espera) ################
--- >>> SESION 1 (d2a_RC_s1)
+-- ################ 3.2a READ COMMITTED - evita lectura sucia, la lectura espera  (primero SESION 1, luego SESION 2) ################
+-- >>> SESION 1
 USE MatriculaDB;
 SET NOCOUNT ON;
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  BEGIN TRAN + UPDATE: resta 1 cupo (sin COMMIT)';
 BEGIN TRANSACTION;
 UPDATE Asignaturas SET cupos_disponibles = cupos_disponibles - 1 WHERE asignatura_id = 1;
 SELECT cupos_disponibles AS cupos_dentro_de_mi_transaccion FROM Asignaturas WHERE asignatura_id = 1;
-WAITFOR DELAY '00:00:10';
+WAITFOR DELAY '00:00:30';
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  El estudiante cancela: ROLLBACK';
 ROLLBACK;
 SELECT cupos_disponibles AS cupos_reales_tras_rollback FROM Asignaturas WHERE asignatura_id = 1;
--- >>> SESION 2 (d2a_RC_s2)
+-- >>> SESION 2
 USE MatriculaDB;
 SET NOCOUNT ON;
 WAITFOR DELAY '00:00:04';
@@ -234,8 +235,8 @@ PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Nivel READ C
 SELECT cupos_disponibles AS cupos_leidos_CONFIRMADOS FROM Asignaturas WHERE asignatura_id = 1;
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Lectura terminada. Espere (ms): ' + CAST(DATEDIFF(MILLISECOND, @ini, SYSDATETIME()) AS VARCHAR(10));
 
--- ################ 3.2b READ COMMITTED - lectura no repetible ################
--- >>> SESION 1 (d2b_RC_s1)
+-- ################ 3.2b READ COMMITTED - lectura no repetible  (primero SESION 2, luego SESION 1) ################
+-- >>> SESION 1
 USE MatriculaDB;
 SET NOCOUNT ON;
 WAITFOR DELAY '00:00:03';
@@ -244,20 +245,20 @@ BEGIN TRANSACTION;
 UPDATE Asignaturas SET cupos_disponibles = cupos_disponibles - 1 WHERE asignatura_id = 1;
 COMMIT;
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  COMMIT realizado (no tuvo que esperar a la Sesion 2)';
--- >>> SESION 2 (d2b_RC_s2)
+-- >>> SESION 2
 USE MatriculaDB;
 SET NOCOUNT ON;
 SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
 BEGIN TRANSACTION;
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  READ COMMITTED: primera lectura';
 SELECT cupos_disponibles AS primera_lectura FROM Asignaturas WHERE asignatura_id = 1;
-WAITFOR DELAY '00:00:08';
+WAITFOR DELAY '00:00:25';
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Segunda lectura dentro de la MISMA transaccion';
 SELECT cupos_disponibles AS segunda_lectura_NO_REPETIBLE FROM Asignaturas WHERE asignatura_id = 1;
 COMMIT;
 
--- ################ 3.3a REPEATABLE READ - el cupo no cambia y el escritor espera ################
--- >>> SESION 1 (d3a_RR_s1)
+-- ################ 3.3a REPEATABLE READ - el cupo no cambia y el escritor espera  (primero SESION 2, luego SESION 1) ################
+-- >>> SESION 1
 USE MatriculaDB;
 SET NOCOUNT ON;
 WAITFOR DELAY '00:00:03';
@@ -266,21 +267,21 @@ PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Intento rest
 UPDATE Asignaturas SET cupos_disponibles = cupos_disponibles - 1 WHERE asignatura_id = 1;
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  UPDATE completado tras esperar (ms): ' + CAST(DATEDIFF(MILLISECOND, @ini, SYSDATETIME()) AS VARCHAR(10));
 SELECT cupos_disponibles AS cupos_finales FROM Asignaturas WHERE asignatura_id = 1;
--- >>> SESION 2 (d3a_RR_s2)
+-- >>> SESION 2
 USE MatriculaDB;
 SET NOCOUNT ON;
 SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 BEGIN TRANSACTION;
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  REPEATABLE READ: primera lectura';
 SELECT cupos_disponibles AS primera_lectura FROM Asignaturas WHERE asignatura_id = 1;
-WAITFOR DELAY '00:00:10';
+WAITFOR DELAY '00:00:25';
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Segunda lectura (mismo dato, misma transaccion)';
 SELECT cupos_disponibles AS segunda_lectura_REPETIBLE FROM Asignaturas WHERE asignatura_id = 1;
 COMMIT;
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  COMMIT: libero el bloqueo';
 
--- ################ 3.3b REPEATABLE READ - lectura fantasma ################
--- >>> SESION 1 (d3b_RR_s1)
+-- ################ 3.3b REPEATABLE READ - lectura fantasma  (primero SESION 2, luego SESION 1) ################
+-- >>> SESION 1
 USE MatriculaDB;
 SET NOCOUNT ON;
 WAITFOR DELAY '00:00:03';
@@ -288,20 +289,20 @@ DECLARE @ini DATETIME2 = SYSDATETIME();
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  INSERT de una matricula nueva en la materia 1...';
 INSERT INTO Registros_Matricula (estudiante_id, asignatura_id, estado) VALUES (3, 1, 'CONFIRMADA');
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  INSERT completado. Espera (ms): ' + CAST(DATEDIFF(MILLISECOND, @ini, SYSDATETIME()) AS VARCHAR(10));
--- >>> SESION 2 (d3b_RR_s2)
+-- >>> SESION 2
 USE MatriculaDB;
 SET NOCOUNT ON;
 SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 BEGIN TRANSACTION;
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  REPEATABLE READ: cuento los inscritos';
 SELECT COUNT(*) AS inscritos_primera_lectura FROM Registros_Matricula WHERE asignatura_id = 1;
-WAITFOR DELAY '00:00:08';
+WAITFOR DELAY '00:00:25';
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Cuento de nuevo en la misma transaccion';
 SELECT COUNT(*) AS inscritos_segunda_lectura_FANTASMA FROM Registros_Matricula WHERE asignatura_id = 1;
 COMMIT;
 
--- ################ 3.4 SERIALIZABLE - sin fantasmas, la Sesion 1 espera ################
--- >>> SESION 1 (d4_SER_s1)
+-- ################ 3.4 SERIALIZABLE - sin fantasmas, el INSERT espera  (primero SESION 2, luego SESION 1) ################
+-- >>> SESION 1
 USE MatriculaDB;
 SET NOCOUNT ON;
 WAITFOR DELAY '00:00:03';
@@ -309,21 +310,22 @@ DECLARE @ini DATETIME2 = SYSDATETIME();
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  INSERT de una matricula nueva en la materia 1...';
 INSERT INTO Registros_Matricula (estudiante_id, asignatura_id, estado) VALUES (3, 1, 'CONFIRMADA');
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  INSERT completado. Espera (ms): ' + CAST(DATEDIFF(MILLISECOND, @ini, SYSDATETIME()) AS VARCHAR(10));
--- >>> SESION 2 (d4_SER_s2)
+-- >>> SESION 2
 USE MatriculaDB;
 SET NOCOUNT ON;
 SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 BEGIN TRANSACTION;
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  SERIALIZABLE: cuento los inscritos';
 SELECT COUNT(*) AS inscritos_primera_lectura FROM Registros_Matricula WHERE asignatura_id = 1;
-WAITFOR DELAY '00:00:08';
+WAITFOR DELAY '00:00:25';
 PRINT '[SESION 2] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Cuento de nuevo en la misma transaccion';
 SELECT COUNT(*) AS inscritos_segunda_lectura_SIN_FANTASMA FROM Registros_Matricula WHERE asignatura_id = 1;
 COMMIT;
 
 /* ======================================================================
    4. VALOR AGREGADO: PROCEDIMIENTO sp_Matricular (UPDLOCK) Y PRUEBA CONCURRENTE
-   (antes: UPDATE Asignaturas SET cupos_disponibles=1 WHERE asignatura_id=3; DELETE FROM Registros_Matricula WHERE asignatura_id=3;)
+   Antes: UPDATE Asignaturas SET cupos_disponibles=1 WHERE asignatura_id=3; DELETE FROM Registros_Matricula WHERE asignatura_id=3;
+   Ejecutar primero SESION 1 y enseguida SESION 2.
    ====================================================================== */
 
 USE MatriculaDB;
@@ -357,7 +359,7 @@ GO
 USE MatriculaDB;
 SET NOCOUNT ON;
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Estudiante 3 pide el ULTIMO cupo de Metaheuristicas';
-EXEC dbo.sp_Matricular @estudiante_id = 3, @asignatura_id = 3, @demora = '00:00:08';
+EXEC dbo.sp_Matricular @estudiante_id = 3, @asignatura_id = 3, @demora = '00:00:25';
 PRINT '[SESION 1] ' + CONVERT(VARCHAR(12), SYSDATETIME(), 114) + '  Fin';
 SELECT asignatura_id, nombre_materia, cupos_disponibles FROM Asignaturas WHERE asignatura_id = 3;
 -- >>> SESION 2
