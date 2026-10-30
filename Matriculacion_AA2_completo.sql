@@ -806,3 +806,63 @@ DROP TABLE #a, #b;
 ROLLBACK TRANSACTION;
 PRINT 'ROLLBACK ejecutado: la base quedo igual que antes de la prueba.';
 GO
+
+-- ################ 05_innovacion_reporte_historial (procedimiento extra de innovacion) ################
+USE MatriculaDB_AA2;
+GO
+/* Innovacion funcional: sp_ReporteHistorialCupos.
+   Historial_Cupos guarda TODO cambio de cupo (matriculas, retiros y ajustes de un administrador). Este reporte
+   los separa por origen probable (segun cuanto cambio el cupo) para ver rapido cuales fueron ajustes manuales.
+   Parametro opcional: sin valor muestra todas las asignaturas; con un id, solo esa. */
+CREATE OR ALTER PROCEDURE dbo.sp_ReporteHistorialCupos
+    @asignatura_id INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        IF @asignatura_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.Asignaturas WHERE asignatura_id = @asignatura_id)
+            THROW 50020, 'La asignatura indicada no existe.', 1;
+
+        ;WITH cambios AS (
+            SELECT  h.historial_id, h.asignatura_id, h.cupo_anterior, h.cupo_nuevo, h.fecha_cambio,
+                    h.cupo_nuevo - h.cupo_anterior AS diferencia,
+                    CASE h.cupo_nuevo - h.cupo_anterior
+                         WHEN -1 THEN N'Matricula'
+                         WHEN  1 THEN N'Retiro'
+                         ELSE N'Ajuste manual' END AS origen_probable
+            FROM    dbo.Historial_Cupos h
+            WHERE   @asignatura_id IS NULL OR h.asignatura_id = @asignatura_id
+        )
+        SELECT  c.historial_id, a.nombre_materia AS materia, c.cupo_anterior AS antes, c.cupo_nuevo AS despues,
+                c.diferencia, c.origen_probable, c.fecha_cambio
+        FROM    cambios c
+        JOIN    dbo.Asignaturas a ON a.asignatura_id = c.asignatura_id
+        WHERE   c.origen_probable = N'Ajuste manual'
+        ORDER BY c.historial_id;
+
+        SELECT  CASE h.cupo_nuevo - h.cupo_anterior WHEN -1 THEN N'Matricula' WHEN 1 THEN N'Retiro' ELSE N'Ajuste manual' END AS origen,
+                COUNT(*) AS cambios
+        FROM    dbo.Historial_Cupos h
+        WHERE   @asignatura_id IS NULL OR h.asignatura_id = @asignatura_id
+        GROUP BY CASE h.cupo_nuevo - h.cupo_anterior WHEN -1 THEN N'Matricula' WHEN 1 THEN N'Retiro' ELSE N'Ajuste manual' END
+        ORDER BY cambios DESC;
+    END TRY
+    BEGIN CATCH
+        THROW;
+    END CATCH
+END;
+GO
+
+SET NOCOUNT ON;
+PRINT '=== Reporte de todas las asignaturas: ajustes manuales y resumen por origen ===';
+EXEC dbo.sp_ReporteHistorialCupos;
+PRINT '=== Solo la asignatura 7 (Estadistica) ===';
+EXEC dbo.sp_ReporteHistorialCupos @asignatura_id = 7;
+PRINT '=== Prueba de error: asignatura 99 no existe ===';
+BEGIN TRY
+    EXEC dbo.sp_ReporteHistorialCupos @asignatura_id = 99;
+END TRY
+BEGIN CATCH
+    PRINT 'Rechazado: ' + ERROR_MESSAGE();
+END CATCH
+GO
